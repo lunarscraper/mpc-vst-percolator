@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "percolator.h"
 
 /* PERC_TRACE (a device test build only: "cflags" -DPERC_TRACE): every parameter set, state restore, MIDI message,
@@ -50,6 +51,7 @@ typedef struct {
 } mpc_engine_t;
 const mpc_engine_t *mpc_engine(void);
 int mpc_engine_changed(void *inst, char *key, int len);   /* optional (engine.h): what a MIDI CC changed */
+void mpc_engine_transport(void *inst, double bpm, double ppq, int playing);   /* optional (engine.h): PLAY / STOP */
 
 #define VK(v, k) (P_V1_TUNE + VSTRIDE * (v) + (k))
 #define VALGO(v) VK(v, 8)
@@ -287,9 +289,14 @@ static void tap_release(perc_t *P) {
         __atomic_add_fetch(&b->gen, 1, __ATOMIC_ACQ_REL);
 }
 
-static inline int16_t out_sample(float x) {   /* a soft ceiling instead of a hard clip */
+static inline float soft_ceiling(float x) {   /* instead of a hard clip */
     float ax = fabsf(x);
     if (ax > 0.9f) x = copysignf(0.9f + 0.1f * sat((ax - 0.9f) * 10.0f), x);
+    return x;
+}
+
+static inline int16_t out_sample(float x) {
+    x = soft_ceiling(x);
     int s = (int)lrintf(x * 32767.0f);
     return (int16_t)(s > 32767 ? 32767 : s < -32768 ? -32768 : s);
 }
@@ -347,6 +354,106 @@ static void tap_render(perc_t *P, int o, int16_t *out, int frames) {
     }
 }
 
+/* ---- STEMS (2.1.0) --------------------------------------------------------------------------------------------- *
+ * With STEMS on, each voice, the delay's echoes and the mix are written to the card as WAV files (stemrec.h): a take
+ * starts at PLAY and ends after STOP once the sound has died away (half a second of silence, at most 15 s), in a
+ * folder of its own. DRY: each voice as it leaves its channel (filter, drive, LEVEL), without the compressor; AS
+ * HEARD: each with its share of the compressor's gain, so V1-V4 + FX add up to MIX. Both at the mix's level (x VOLUME).
+ * A voice played on another track (OUT 1-4) is recorded as it goes there. MIX is this track's output as heard.
+ * A host that doesn't tell the engine its transport (a wrapper without mpc_engine_transport): STEMS on starts a take,
+ * off ends it. Not on a track that plays an OUT (TRACK PLAYS = OUT n): the main Percolator records the voices. */
+enum { ST_IDLE, ST_REC, ST_TAIL };
+#define ST_WAIT 16        /* blocks (46 ms) without transport before the switch alone starts a take */
+#define ST_NCH (NV + 2)   /* V1-V4, FX, MIX */
+static const char *const ST_NAMES[ST_NCH] = {"V1", "V2", "V3", "V4", "FX", "MIX"};
+static const char *const ST_INFO[ST_NCH] = {
+    "voice 1", "voice 2", "voice 3", "voice 4",
+    "the BBD delay's echoes (its return; the voices' FX SEND feeds it)",
+    "this track's output, as heard (with the compressor and VOLUME), for reference"};
+
+static void stems_base(const perc_t *P, char *buf, int len) {
+    struct stat st;
+    const char *env = getenv("PERCOLATOR_STEMS_DIR");   /* offline tests */
+    if (env && *env) snprintf(buf, len, "%s", env);
+    else if (!stat("/sdcard/Force Documents", &st) && S_ISDIR(st.st_mode)) snprintf(buf, len, "/sdcard/Force Documents/Percolator Stems");
+    else if (!stat("/sdcard/MPC Documents", &st) && S_ISDIR(st.st_mode)) snprintf(buf, len, "/sdcard/MPC Documents/Percolator Stems");
+    else snprintf(buf, len, "%.440s/stems", P->dir[0] ? P->dir : ".");
+}
+
+/* STEMS set (a touch, a Q-Link, a project loading): the recorder starts the first time, and wakes or sleeps */
+static void stems_sync(perc_t *P) {
+    int on = (int)P->pv[P_STEMS] > 0;
+    if (on && !P->stems.ok) {
+        char base[480];
+        stems_base(P, base, sizeof base);
+        sr_init(&P->stems, "Percolator", ST_NCH, ST_NAMES, ST_INFO, base);
+    }
+    sr_arm(&P->stems, on);
+}
+
+static void stems_stop(perc_t *P) {
+    sr_stop(&P->stems);
+    P->st_state = ST_IDLE;
+}
+
+/* at the start of a block: start, carry on or end the take; 1 = this block is recorded */
+static int stems_begin(perc_t *P) {
+    stemrec_t *S = &P->stems;
+    /* no transport heard of yet: a host without the hook, or the very first blocks; the switch alone starts a take only
+     * once ST_WAIT blocks have gone by without it */
+    if (P->st_blocks < ST_WAIT) P->st_blocks++;
+    if (!S->ok) return 0;
+    sr_poll(S);
+    int mode = (int)P->pv[P_STEMS], want = mode > 0 && (P->tp_seen ? P->tp_playing : P->st_blocks >= ST_WAIT);
+    if (P->st_state == ST_REC && !want) {
+        if (mode > 0) {   /* STOP: keep the tail (decays, echoes) */
+            P->st_state = ST_TAIL;
+            P->st_tail = P->st_quiet = 0;
+        } else stems_stop(P);
+    } else if (P->st_state == ST_TAIL && (want || mode == 0)) stems_stop(P);   /* PLAY again: a new take */
+    if (P->st_state == ST_IDLE && want) {
+        sr_meta_t m;
+        memset(&m, 0, sizeof m);
+        m.transport = P->tp_seen;
+        m.bpm = P->tp_seen ? P->tp_bpm : 0;
+        m.ppq = P->tp_seen ? P->tp_ppq : -1;
+        int k = (int)P->pv[P_KIT];
+        snprintf(m.label, sizeof m.label, "%s", k >= 0 && k < P->nkits ? P->kits[k].name : "");
+        snprintf(m.mode, sizeof m.mode, "%s", mode == 1 ? "DRY" : "AS HEARD");
+        if (!sr_start(S, &m)) {
+            P->st_state = ST_REC;
+            P->st_g = 1.0f;
+        }
+    }
+    return P->st_state != ST_IDLE;
+}
+
+/* at the end of a block: the tail after STOP ends after half a second of silence, or 15 s */
+static void stems_end(perc_t *P, float peak, int frames) {
+    if (P->st_state != ST_TAIL) return;
+    P->st_tail += frames;
+    P->st_quiet = peak < 1e-5f ? P->st_quiet + frames : 0;   /* -100 dB */
+    if (P->st_quiet >= SR_RATE / 2 || P->st_tail >= 15 * SR_RATE) stems_stop(P);
+}
+
+static int stems_status(const perc_t *P, char *buf, int len) {
+    const stemrec_t *S = &P->stems;
+    int mode = (int)P->pv[P_STEMS], err = S->ok ? SR_LOAD(S->err) : SR_OK, saved = S->ok ? SR_LOAD(S->saved) : 0;
+    if (!mode) return snprintf(buf, len, "OFF");
+    if (P->pv[P_OUTPUT] >= 1) return snprintf(buf, len, "ONLY ON THE MAIN KIT");
+    if (!S->ok) return snprintf(buf, len, "CAN'T START THE RECORDER");
+    if (P->st_state != ST_IDLE) {
+        unsigned s = __atomic_load_n(&S->take_frames, __ATOMIC_RELAXED) / SR_RATE;
+        if (err == SR_ERR_OPEN) return snprintf(buf, len, "CAN'T WRITE TO THE CARD");
+        if (err == SR_ERR_WRITE) return snprintf(buf, len, "CARD FULL? NOT SAVING");
+        return snprintf(buf, len, "REC %u:%02u%s", s / 60, s % 60, P->st_state == ST_TAIL ? "  ENDING" : "");
+    }
+    if (err == SR_ERR_OPEN) return snprintf(buf, len, "CAN'T WRITE TO THE CARD");
+    if (err == SR_ERR_WRITE) return snprintf(buf, len, "CARD FULL? TAKE CUT SHORT");
+    if (saved) return snprintf(buf, len, "SAVED %02d:%02d:%02d, ARMED", (saved - 1) / 10000, (saved - 1) / 100 % 100, (saved - 1) % 100);
+    return snprintf(buf, len, "ARMED: PLAY RECORDS");
+}
+
 static void e_render(void *inst, int16_t *out, int frames) {
     perc_t *P = inst;
     apply_kit(P);
@@ -354,9 +461,12 @@ static void e_render(void *inst, int16_t *out, int frames) {
     for (int k = 0, n; k < 256 && (n = mi_read(&P->midi_in, m)) > 0; k++) e_midi(P, m, n);
     int tap = (int)P->pv[P_OUTPUT];
     if (tap) {
+        if (P->st_state != ST_IDLE) stems_stop(P);
         tap_render(P, tap - 1, out, frames);
         return;
     }
+    int rec = stems_begin(P), dry = (int)P->pv[P_STEMS] == 1;
+    float st_peak = 0.0f;
     fpstate_t fp = ftz_on();
     /* OUT 1-4: this one writes them if it is the main one, and leaves out the voices something else plays */
     tapbus_t *bus = P->bus;
@@ -383,6 +493,8 @@ static void e_render(void *inst, int16_t *out, int frames) {
     for (int off = 0; off < frames; off += SUB) {
         int n = frames - off < SUB ? frames - off : SUB;
         float mix[SUB] = {0}, cbus[SUB] = {0}, send[SUB] = {0};
+        float vy[NV][SUB], vcs[NV], stb[SUB * ST_NCH];   /* STEMS: each voice's block, comp send, the frames */
+        int vt[NV];
         lfo_step(P, n);
         for (int o = 0; o < TAP_OUTS; o++)   /* an OUT is written only while something reads it */
             if (tapped[o])
@@ -393,6 +505,11 @@ static void e_render(void *inst, int16_t *out, int frames) {
             int live = P->v[v].active || P->v[v].room.tail > 0;   /* silent: nothing to mix */
             vparams(P, v, &vp);
             voice_block(P, v, &vp, y, send, n);
+            if (rec) {
+                for (int i = 0; i < n; i++) vy[v][i] = live ? y[i] : 0.0f;
+                vcs[v] = cs;
+                vt[v] = vout[v] >= 0 && tapped[vout[v]];
+            }
             if (!live) continue;
             if (vout[v] >= 0 && tapped[vout[v]])
                 for (int i = 0; i < n; i++) bus->ring[vout[v]][(w0 + off + i) & (TAP_N - 1)] += y[i];
@@ -418,16 +535,35 @@ static void e_render(void *inst, int16_t *out, int frames) {
             P->dl_in2 += ca * (P->dl_in1 - P->dl_in2);
             P->dl[P->dl_w] = sat(P->dl_in2 + fb * wet);
             P->dl_w = (P->dl_w + 1) & (DL_N - 1);
-            float c = cbus[i] * 0.55f;
+            float c0 = cbus[i] * 0.55f, c = c0;
             if (cmp.on) c = comp_run(&P->comp_env, &cmp, c);
             float x = (mix[i] * 0.55f + wet * 0.55f + c) * vol;
+            if (rec) {   /* STEMS: V1-V4, FX, MIX for this frame (the gain is the compressor's, as it just ran) */
+                float st[ST_NCH], g = P->st_g;
+                if (!cmp.on) g = 1.0f;
+                else if (fabsf(c0) > 1e-12f) g = c / c0;
+                P->st_g = g;
+                for (int v = 0; v < NV; v++) {
+                    float a = vy[v][i] * 0.55f;
+                    st[v] = vt[v] ? a : dry ? a * vol : a * ((1.0f - vcs[v]) + vcs[v] * g) * vol;
+                }
+                st[NV] = wet * 0.55f * vol;
+                st[NV + 1] = soft_ceiling(x);
+                for (int k = 0; k < ST_NCH; k++) {
+                    float a = fabsf(st[k]);
+                    if (a > st_peak) st_peak = a;
+                    stb[i * ST_NCH + k] = st[k];
+                }
+            }
             P->hold[P->hold_w & (TAP_HOLD - 1)] = x;
             if (hold) x = P->hold[(P->hold_w - (uint32_t)frames) & (TAP_HOLD - 1)];   /* a block late, with the taps */
             P->hold_w++;
             out[2 * (off + i)] = out[2 * (off + i) + 1] = out_sample(x);
         }
+        if (rec) sr_write(&P->stems, stb, n);
     }
     if (own) TB_STORE(bus->wpos, w0 + (uint32_t)frames);
+    if (rec) stems_end(P, st_peak, frames);
     ftz_off(fp);
 }
 
@@ -486,6 +622,7 @@ static void e_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "state")) {
         P->kit_pending = -1;   /* a restore says which kit it is, and every knob */
         set_state(P, val);
+        stems_sync(P);
         return;
     }
     int i = find_key(key);
@@ -496,6 +633,7 @@ static void e_set_param(void *inst, const char *key, const char *val) {
     } else {
         apply_kit(P);   /* a kit first, then this on top of it, in the order they came */
         set_value(P, i, val);
+        if (i == P_STEMS) stems_sync(P);
     }
 }
 
@@ -530,6 +668,7 @@ static int e_get_param(void *inst, const char *key, char *buf, int len) {
         return get_state(P, buf, len);
     }
     if (!strcmp(key, "kit_count")) return snprintf(buf, len, "%d", P->nkits);
+    if (!strcmp(key, "stems_status")) return stems_status(P, buf, len);
     int cur_kit = P->kit_pending >= 0 ? P->kit_pending : (int)P->pv[P_KIT];   /* as set, loaded or not */
     if (!strcmp(key, "kit")) return snprintf(buf, len, "%d", cur_kit);
     if (!strcmp(key, "kit_name") || !strncmp(key, "kit_name_at:", 12)) {
@@ -622,6 +761,8 @@ static void e_destroy(void *inst) {
     perc_t *P = inst;
     TRACE("destroy %p", inst);
     if (!P) return;
+    if (P->st_state != ST_IDLE) stems_stop(P);
+    sr_free(&P->stems);   /* closes the take: the files are complete */
     tap_release(P);
     tapbus_close(P->bus);
     mi_close(&P->midi_in);
@@ -645,4 +786,13 @@ int mpc_engine_changed(void *inst, char *key, int len) {
             return snprintf(key, len, "%s", PDEF[32 * w + b].key) > 0;
         }
     return 0;
+}
+
+/* The wrapper calls this once per host buffer, before rendering it (engine.h): STEMS follows PLAY / STOP. */
+void mpc_engine_transport(void *inst, double bpm, double ppq, int playing) {
+    perc_t *P = inst;
+    P->tp_seen = 1;
+    P->tp_playing = playing != 0;
+    P->tp_bpm = bpm;
+    P->tp_ppq = ppq;
 }

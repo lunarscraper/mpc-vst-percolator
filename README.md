@@ -20,7 +20,8 @@ which mode, where each knob is, the LFO, the delay), but it won't sound exactly 
 - Files: the release installs one folder, `/sdcard/Synths/Steve A - VST - [DRUM] Percolator/`, holding `percolator.so`, its screen. The vst_instruments installer puts `percolator.so` in `/sdcard/vst/` instead.
 - Data folder: `percolator/` next to `percolator.so` (with the vst_instruments installer, `/sdcard/vst/percolator/`):
   where the kit packs go
-- 139 parameters (all automatable) on 9 pages, one Q-Link page each
+- 141 parameters (all automatable) on 9 pages, one Q-Link page each
+- **STEMS** (2.1.0): records each voice, the delay and the mix as WAV files on the card while the song plays, for mixing or mastering elsewhere ([below](#stems-each-voice-as-a-wav-file))
 - 8 kits built in, in MPC's PRESET menu; Erica Synths' four free Pērkons kit packs add 169 more ([below](#pērkons-kit-packs))
 
 ## Playing it
@@ -131,6 +132,41 @@ and compressor; their FX SEND still feeds its delay.
 - How it works: OUT 1-4 live in a small shared-memory region every Percolator and Percolator OUT maps when it's
   created (`src/tapbus.h`).
 
+## Stems: each voice as a WAV file
+
+For mixing or mastering outside the MPC, Percolator can record what it plays as separate files: switch **STEMS** (top
+right of the **MIDI & OUT** page) from OFF to **DRY** or **AS HEARD**, press PLAY, play the song, press STOP. That's a
+take. Leave STEMS on and every PLAY ... STOP makes another one; switch it OFF and nothing is recorded or written.
+
+- **Where:** `/sdcard/Force Documents/Percolator Stems/` on a Force, `/sdcard/MPC Documents/Percolator Stems/` on an
+  MPC (otherwise `stems/` in Percolator's data folder): a folder per take, named by when it started and the kit,
+  e.g. `2026-10-12 15-03-12 Init/`. MPC's browser shows it; or copy it off the card.
+- **What:** `Percolator V1.wav` ... `Percolator V4.wav` (each voice), `Percolator FX.wav` (the BBD delay's echoes),
+  `Percolator MIX.wav` (this track's output as heard, for reference) and `take.txt` (tempo, where in the song the take
+  started, length, each file's peak). WAV, 32-bit float, mono (Percolator is mono), 44.1 kHz. Every file starts on the
+  same sample and has the same length: lay them side by side at the same point and they line up to the sample.
+- **DRY**: each voice as it leaves its own channel (algorithm, filter, drive, LEVEL), **without the compressor**, so
+  you can compress outside. **AS HEARD**: each voice with its share of the compressor's gain (by its COMP SEND), so
+  V1 + V2 + V3 + V4 + FX add up to MIX. Both at the mix's level (VOLUME included), in float: nothing clips in the
+  file even above 0 dBFS.
+- **The take** starts with the first block after PLAY and ends after STOP once the sound has died away (half a second of
+  silence, 15 s at the most), so decays and echoes aren't cut. Pressing PLAY again during that tail starts the next
+  take. Switching STEMS off ends a take at once. Going back to the start while playing (a loop) carries on in the same
+  take. take.txt says at which quarter note the take started: from the song's start, nothing to move; from bar 17,
+  place the files there.
+- **A voice on OUT 1-4** (played on another track) is still recorded, as it goes there; MIX is this track only, lined
+  up with the other files (the track itself plays a block later while an OUT is played, [above](#separate-outputs-out-1-4)).
+- **The screen** under STEMS: ARMED: PLAY RECORDS, REC 1:23, SAVED 15:03:12, or what went wrong (CAN'T WRITE TO THE
+  CARD, CARD FULL?).
+- **In the background:** the audio thread only copies each block into a 12-second buffer; a thread of its own writes
+  the files every 20 ms (about 1 MB/s for the six files). If the card stalls longer than the buffer, the missing part
+  is written as silence in every file, so the timeline holds, and take.txt says so. The sound is the same, bit for bit,
+  with STEMS on or off.
+- STEMS is saved with the project, like any control: a project saved with it on records again on PLAY.
+- Only the main Percolator records (TRACK PLAYS = MAIN KIT); on a track that plays an OUT it says ONLY ON THE MAIN KIT.
+
+The recorder is `src/stemrec.h`, written to be reused by any engine with separate voices.
+
 ## Pages
 
 Screenshots are rendered from the built skin with the engine's real values right after it's inserted (the Init kit).
@@ -171,7 +207,7 @@ buttons), in the voice pages' order (TUNE DECAY PARAM 1 PARAM 2 / CUTOFF DRIVE F
 <img src="screenshots/page_7.png" width="760" alt="Percolator, each voice's MIDI and output">
 
 What this track plays (TRACK PLAYS: MAIN KIT, or OUT 1-4 of the main Percolator, [above](#separate-outputs-out-1-4)),
-then a panel per voice, each a Q-Link column: NOTE (arrows, or turn its Q-Link), KEYS CH and OUT
+**STEMS** with its status ([above](#stems-each-voice-as-a-wav-file)), then a panel per voice, each a Q-Link column: NOTE (arrows, or turn its Q-Link), KEYS CH and OUT
 ([Playing it](#playing-it)).
 
 ### 9. MIDI MOD
@@ -275,6 +311,14 @@ Use one or the other for this plugin: both register the same plugin (same uid), 
   python3 mpc/gen.py
   docker run --rm -v "$PWD:$PWD" -w "$PWD" mpc-vst-html-art python3 mpc/skin.py build/skin.json
   ```
+- `src/stemrec.h`: the STEMS recorder (a lock-free ring buffer and a writer thread; nothing about drums in it).
+  `mpc/stems_test.c` checks it offline against the engine (87 checks: the files add up to the mix, MIX = the output,
+  takes per PLAY / STOP, the tail, STEMS off, no transport, a voice on an OUT, a stalled card, an unwritable card,
+  destroyed mid-take, a project loading, the output unchanged):
+  ```
+  cc -O1 -g -fsanitize=address,undefined -Isrc mpc/stems_test.c src/percolator.c src/voices.c src/kits.c -lm -lpthread -ldl -o build/stems_test
+  build/stems_test build/stems_out
+  ```
 - `mpc/render.c` renders kits offline to WAV (each voice alone, then a groove), no MPC needed:
   ```
   cc -O2 -Isrc mpc/render.c src/percolator.c src/voices.c src/kits.c -lm -lpthread -o build/render
@@ -331,6 +375,14 @@ Use one or the other for this plugin: both register the same plugin (same uid), 
   `mpc_engine_changed`) installed with their own installers on the Live II and checked by the owner (2026-10-12: the
   project, kit packs, pads, pages, Percolator MIDI In, a MIDI MOD lane with the screen following, Percolator OUT on an
   audio track, STOP, save and reload): "all working". Published as v2.0.0; `tested.json` records it.
+- 2.1.0 (2026-10-12, not yet on a device): **STEMS** (a Force owner: each voice in the background as a stem when
+  needed, to master outside). `src/stemrec.h`, the engine follows the host's transport (`mpc_engine_transport`, in the
+  framework at `eaef502` already), two new parameters at the end (STEMS, STEMS STATUS) on the MIDI & OUT page (TRACK
+  PLAYS' menu moved left to make room). Offline: `mpc/stems_test.c` PASSED under ASan/UBSan and ThreadSanitizer (87
+  checks); with STEMS off the output is the same as 2.0.0's, bit for bit (8 kits x compressor off/on); the host test
+  PASSED with both frameworks (vst_instruments' and `eaef502`); `check_skin.py` OK. The screen in `deploy/` is 2.0.0's
+  with only the MIDI & OUT page changed (its background, the two menus, the readout). `deploy/vst/percolator.so` is
+  left out until it is rebuilt: the release builds it (Actions).
 
 ## Files
 
@@ -340,7 +392,7 @@ Use one or the other for this plugin: both register the same plugin (same uid), 
 | `.github/workflows/release.yml` | the release build (GitHub Actions, a draft release) |
 | `tested.json` | the releases checked on a device, for the catalogue's "Tested on" |
 | `FRAMEWORK.md` | the changes to sd88me's tools this plugin is built with, and why |
-| `deploy/` | ready to install: `vst/` → `/sdcard/vst/`, `Synths/` → `/sdcard/Synths/`, plus the plugin-list entry |
+| `deploy/` | ready to install: `vst/` → `/sdcard/vst/` (not in 2.1.0's source until it's built), `Synths/` → `/sdcard/Synths/`, plus the plugin-list entry |
 | `vst.json` | build settings: name, maker, sources, the kit list in the PRESET menu |
 | `params.json` | the plugin's parameters as MPC sees them (VST index = order; append-only once released) |
 | `layout.conf` | the screen: nine pages, Q-Links (generated) |

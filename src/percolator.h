@@ -8,6 +8,7 @@
 #include "params_def.h"
 #include "tapbus.h"
 #include "midiin.h"
+#include "stemrec.h"
 
 #define NV 4            /* voices */
 #define NK 8            /* knobs per voice */
@@ -119,6 +120,14 @@ typedef struct perc {
     uint32_t hold_w;
     mi_port_t midi_in;     /* "Percolator MIDI In": notes on their own channels, for KEYS CH (midiin.h) */
     uint32_t changed[5];   /* parameters a MIDI CC set, for MPC's screen (mpc_engine_changed), a bit each */
+    /* STEMS (2.1.0): each voice, the delay and the mix as WAV files, from PLAY to STOP (stemrec.h; percolator.c stems_*) */
+    stemrec_t stems;
+    int st_state;          /* ST_IDLE, ST_REC, ST_TAIL (after STOP, until the sound has died away) */
+    int st_tail, st_quiet; /* frames since STOP, and of silence, in ST_TAIL */
+    float st_g;            /* the compressor's last gain (AS HEARD) */
+    int tp_seen, tp_playing;   /* the host's transport (mpc_engine_transport): ever heard from, playing */
+    int st_blocks;         /* blocks rendered, up to ST_WAIT (a host without the transport hook: see stems_begin) */
+    double tp_bpm, tp_ppq;
 } perc_t;
 
 #define DL_N 65536

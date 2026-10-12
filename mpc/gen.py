@@ -21,6 +21,7 @@ LANES = (("wheel", "MOD WHEEL", 1), ("gp1", "GEN PURPOSE 1", 16), ("gp2", "GEN P
          ("gp3", "GEN PURPOSE 3", 18))   # MIDI MOD: each lane's key, MPC's name for its CC, the CC
 NOTE_NAMES = ["%s%d" % (("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")[n % 12], n // 12 - 2)
               for n in range(128)]   # MPC's names: 60 = C3, 36 = C1
+STEM_MODES = ["OFF", "DRY", "AS HEARD"]   # STEMS (src/percolator.c stems_*)
 WAVES = ["SINE", "TRI", "RAMP", "SAW", "SQUARE", "S&H", "DRIFT"]
 
 # the Init kit (also the engine's defaults): 0..100 for knobs, option index for switches
@@ -114,6 +115,11 @@ def params():
     for v in range(1, 5):
         for g in (1, 2, 3):
             opts("v%d_gp%d" % (v, g), "V%d GEN PURP %d" % (v, g), WHEEL, 0)
+    # 2.1.0 (owner, 2026-10-12: "jede voice separat im Hintergrund bei Bedarf einzeln als stem mitschneiden", for mastering
+    # outside): STEMS records each voice, the delay and the mix as WAV files on the card, from PLAY to STOP (src/stemrec.h).
+    # DRY: each voice before the compressor; AS HEARD: each with its share of the compressor, so the files add up to the mix
+    opts("stems", "STEMS", STEM_MODES, 0)
+    P.append(dict(key="stems_status", name="STEMS STATUS", min=0, max=0, display="string", type="readout"))
     return P
 
 
@@ -382,14 +388,17 @@ def layout():
     # outputs"): what this instance plays, then a panel per voice = a Q-Link column: NOTE, KEYS CH, OUT
     L.append("[tab MIDI & OUT]")
     L.append("art file=images/skin/bg_io.png x=0 y=86 w=1280 h=628")
-    html = h_panel(8, 94, 1264, 112, COL["mst"], "THIS TRACK PLAYS")
-    html += h_text(28, 140, "MAIN KIT: THE FOUR VOICES, EACH TO ITS OUT BELOW (IN THIS MIX UNTIL SOMETHING PLAYS THAT OUT)",
-                   "#aba7c4", 12, .12, 600)
-    html += h_text(28, 162, "OUT 1-4: ON ANOTHER TRACK, [FX] PERCOLATOR OUT (AN INSERT; AN AUDIO TRACK WILL DO) PLAYS THE VOICES SENT THERE",
-                   "#aba7c4", 12, .12, 600)
-    html += h_text(28, 184, "KEYS CH: A MIDI TRACK SENT TO THE PORT PERCOLATOR MIDI IN, ON THAT CHANNEL, PLAYS THE VOICE PITCHED (C3 = AS TUNED)",
-                   "#6a6782", 12, .12, 600)
-    L.append('popup cx=1140 cy=150 w=220 h=52 label="" key=output')
+    # the top row: THIS TRACK PLAYS, and (2.1.0) STEMS: each voice, the delay and the mix to the card as WAV files
+    html = h_panel(8, 94, 820, 112, COL["mst"], "THIS TRACK PLAYS")
+    html += h_text(28, 140, "MAIN KIT: THE FOUR VOICES, EACH TO ITS OUT BELOW", "#aba7c4", 12, .12, 600)
+    html += h_text(28, 162, "OUT 1-4: [FX] PERCOLATOR OUT ON ANOTHER TRACK PLAYS THEM", "#aba7c4", 12, .12, 600)
+    html += h_text(28, 184, "KEYS CH: A MIDI TRACK TO PORT PERCOLATOR MIDI IN, ON THAT CH", "#6a6782", 12, .12, 600)
+    L.append('popup cx=708 cy=150 w=200 h=52 label="" key=output')
+    html += h_panel(838, 94, 434, 112, COL["kit"], "STEMS")
+    html += h_text(858, 144, "EACH VOICE, FX, MIX", "#aba7c4", 12, .12, 600)
+    html += h_text(858, 162, "PLAY TO STOP, AS WAV", "#6a6782", 12, .12, 600)
+    L.append('popup cx=1160 cy=138 w=200 h=48 label="" key=stems')
+    L.append('readout cx=1055 cy=186 w=400 h=30 vs=22 ink=ink box=no key=stems_status')
     for i, v in enumerate(range(1, 5)):
         x, c = 8 + 318 * i, COL[v]
         cx = x + 154

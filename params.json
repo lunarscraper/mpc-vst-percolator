@@ -2261,6 +2261,24 @@
     "VCF"
    ],
    "default": "OFF"
+  },
+  {
+   "key": "stems",
+   "name": "STEMS",
+   "options": [
+    "OFF",
+    "DRY",
+    "AS HEARD"
+   ],
+   "default": "OFF"
+  },
+  {
+   "key": "stems_status",
+   "name": "STEMS STATUS",
+   "min": 0,
+   "max": 0,
+   "display": "string",
+   "type": "readout"
   }
  ]
 }

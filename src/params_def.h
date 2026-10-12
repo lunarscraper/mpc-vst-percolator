@@ -142,6 +142,8 @@ static const pdef_t PDEF[] = {
     {"v4_gp1", 1, 12, 0.0f},
     {"v4_gp2", 1, 12, 0.0f},
     {"v4_gp3", 1, 12, 0.0f},
+    {"stems", 1, 3, 0.0f},
+    {"stems_status", 3, 0, 0.0f},
 };
 enum {
     P_KIT = 0,
@@ -283,7 +285,9 @@ enum {
     P_V4_GP1 = 136,
     P_V4_GP2 = 137,
     P_V4_GP3 = 138,
-    NP = 139
+    P_STEMS = 139,
+    P_STEMS_STATUS = 140,
+    NP = 141
 };
 /* per-voice block: v%d_tune is P_V1_TUNE + 11 * (v - 1) */
 #define VSTRIDE 11
