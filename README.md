@@ -20,9 +20,10 @@ which mode, where each knob is, the LFO, the delay), but it won't sound exactly 
 - Files: the release installs one folder, `/sdcard/Synths/Steve A - VST - [DRUM] Percolator/`, holding `percolator.so`, its screen. The vst_instruments installer puts `percolator.so` in `/sdcard/vst/` instead.
 - Data folder: `percolator/` next to `percolator.so` (with the vst_instruments installer, `/sdcard/vst/percolator/`):
   where the kit packs go
-- 141 parameters (all automatable) on 9 pages, one Q-Link page each
+- 149 parameters (all automatable) on 9 pages, one Q-Link page each
 - **STEMS** (2.1.0): records each voice, the delay and the mix as WAV files on the card while the song plays, for mixing or mastering elsewhere ([below](#stems-each-voice-as-a-wav-file))
-- 8 kits built in, in MPC's PRESET menu; Erica Synths' four free Pērkons kit packs add 169 more ([below](#pērkons-kit-packs))
+- **TRANSIENT** (2.2.0): a click layer for voices 1-3 that the filter can't take away, a compressor ATTACK and an OUT GAIN, against a kit that sounded thin ([below](#transient-the-attack))
+- 20 kits built in (8 + a techno bank of 12, 2.2.0), in MPC's PRESET menu; Erica Synths' four free Pērkons kit packs add 169 more ([below](#pērkons-kit-packs))
 
 ## Playing it
 
@@ -95,6 +96,28 @@ start-up. A pack that comes with `SAMPLES/1.wav 2.wav 3.wav` (Pērkons pack 2 an
 Then PARAM 2 picks the start point or, when the WAV has cue points (pack 4's breaks), the slice. On the Pērkons this
 needs two settings (Voice 4 / Algo 3 PARAM 2 = start, slicing on); here it follows from the pack having samples.
 
+## TRANSIENT: the attack
+
+Up to 2.1.0 a kick could sound thin: measured on the built-in kits, 95-100 % of a kick's energy sat under 120 Hz and
+under 1 % of its first 10 ms above 1 kHz. The beater's click, which carries a kick through a mix, was missing.
+NOISE HIT and PULSE HIT add one, but short and fixed, and it ran through the voice's filter, which at the kits'
+CUTOFF (about 1.2 kHz low-pass) took most of it away. And the whole kit came out about 10 dB under other plugins.
+
+Since 2.2.0, voices 1-3 have two more knobs in their second row (Q-Link column 3, after CUTOFF and DRIVE):
+
+- **TRANSIENT** (OFF-100 %): how loud the click is. It joins **after the filter**, so CUTOFF doesn't take it away,
+  and **before DRIVE**, which shapes it with the rest. At 70 % a kick's share above 1 kHz in its first 10 ms goes
+  from 0.8 % to 7.5 %.
+- **CLICK TONE** (700 Hz-6.9 kHz): from a dull beater thump (low, about 6 ms) to a bright tick (high, about 1 ms). The
+  click is a sine swept down from twice that frequency plus a burst of band-passed noise.
+
+At OFF (the default, and every Pērkons kit) the voice sounds exactly as before, bit for bit. On the MASTER page:
+
+- **OUT GAIN** (0 / +6 / +12 dB), after VOLUME, into the soft ceiling: +6 dB puts the kit's peaks near 0 dBFS. It
+  counts for the stems too.
+- **ATTACK** in the compressor (INSTANT, as before, to 30 ms): an instant compressor flattens each hit's first
+  milliseconds; 5-15 ms lets the transient through before it pulls down.
+
 ## The compressor
 
 Each voice's **COMP SEND** sets how much of it goes through the compressor (wet) and how much goes past it (dry); the
@@ -102,7 +125,7 @@ delay's echoes always go past it. 100 (all of it, as before 2.0.0) by default. O
 sets the threshold (0 to -36 dB) and **COMP AMOUNT** the ratio (1:1 to 10:1). AMOUNT at 0 reads **OFF**: the
 compressor is bypassed and the kit sounds exactly as without it. Turned up it makes up the level it takes, so it only
 ever makes the voices louder: on the eight built-in kits, from +0.3 dB (a little THRESH) to +11 dB (all the way),
-with the peaks under -3 dB. It catches a peak at once and lets go over about 120 ms. **COMP LEVEL** sets how much
+with the peaks under -3 dB. It catches a peak at once (ATTACK INSTANT; up to 30 ms since 2.2.0, [above](#transient-the-attack)) and lets go over about 120 ms. **COMP LEVEL** sets how much
 comes out of it (-inf to +6 dB; 71 = as it is): it turns down only what goes through the compressor, while
 **VOLUME** turns down the whole kit. COMP LEVEL does nothing while AMOUNT is OFF, so it can't silence the kit then.
 Each voice's own volume is its **LEVEL**, in the MIX panel beside its COMP SEND.
@@ -179,9 +202,9 @@ Eight tabs, in this order, each with one Q-Link page (no sub-pages to swipe betw
 
 **KIT**: every kit, built-in and loaded, also in MPC's PRESET menu. Choosing the kit that is already loaded changes nothing (MPC sets the current one again on STOP, which must not undo your edits): to go back to a kit as saved, pick another and then it. **BBD DELAY**: time (SHORT 8-200 ms, LONG 60 ms-1.2
 s; moving it bends the pitch as a BBD clock would), feedback (it can run away), its own LFO rate and depth, and
-COLOUR (dark or bright repeats). **MASTER**: VOLUME (the whole kit), then the COMPRESSOR: THRESH, AMOUNT, LEVEL.
+COLOUR (dark or bright repeats). **MASTER**: VOLUME (the whole kit) and OUT GAIN, then the COMPRESSOR: THRESH, AMOUNT, ATTACK, LEVEL.
 **MODULATION**: the LFO's speed (0.05-30 Hz), MOD LEVEL and wave (sine, triangle, ramp, saw, square, S&H, drift).
-Q-Link columns: BBD, MASTER, MODULATION, then KIT.
+Q-Link columns: BBD, MASTER (VOLUME, THRESH, AMOUNT, LEVEL), MODULATION, then KIT, OUT GAIN, ATTACK.
 
 ### 2-5. V1, V2, V3, V4
 
@@ -190,7 +213,7 @@ Q-Link columns: BBD, MASTER, MODULATION, then KIT.
 
 One voice per page, each Q-Link column on its own panel: **Q-Link column 1** = ALGO, MODE, VCF (the switches, big
 enough to tap, and the mode's name under MODE), **column 2** = TUNE, DECAY, PARAM 1, PARAM 2, **column 3** = CUTOFF,
-DRIVE, **column 4** = MIX, under the switches: LEVEL (the voice's volume), FX SEND, COMP SEND. Above the knobs, the **envelope display** redraws as you turn its knobs: AMP
+DRIVE and, on voices 1-3, TRANSIENT and CLICK TONE, **column 4** = MIX, under the switches: LEVEL (the voice's volume), FX SEND, COMP SEND. Above the knobs, the **envelope display** redraws as you turn its knobs: AMP
 follows DECAY (a flat line at the top = DRONE), PITCH (voices 1-2) follows PARAM 2's pitch envelope, voice 4's ATTACK
 follows its PARAM 2.
 
@@ -219,7 +242,27 @@ KEYS CH ([Playing it](#playing-it)).
 
 ## Kits
 
-**Built in (8):** Init, Analog, Industrial, Clap Room, Tonal, Lo-Fi, Drone, Thunder.
+**Built in (20):** Init, Analog, Industrial, Clap Room, Tonal, Lo-Fi, Drone, Thunder, and since 2.2.0 a **techno bank**
+built on TRANSIENT (voice 1 the kick, 2 a perc or rumble, 3 clap or snare, 4 the hat or ride):
+
+| Kit | Kick (voice 1) | Voices 2-4 |
+|---|---|---|
+| Techno Warehouse | RES BD punch, 50 Hz, medium click | FM rim, 4-clap slap, white-noise hat; long delay |
+| Alpha Punch | RES BD hard, fast pitch drop, driven: the punch of a Jomox Alpha Base | low fold tom, tight snare, short cymbal hat |
+| Hard Techno 150 | FOLD pulse hit, heavy fold and drive | rumble (FOLD into the delay), 5-clap slap, open hat |
+| Rumble Room | RES BD soft, long | rumble with LFO on its cutoff, classic snare, closed hat sample |
+| Detroit 909 | FOLD clean, bright 909-style click | FM rim, snare, open hat sample |
+| Minimal Tick | short, dry, ticking click | wood block, high tom, short noise hat |
+| Industrial Hall | FOLD noise hit, driven, dull thump | clanking FM, 3-clap slap in the room, PCM noise |
+| Acid Techno | RES BD punch | saw stab (WAVE) with LFO on its cutoff, tight snare, 808 pulse-stack hat |
+| Peak Time | FOLD pulse hit, driven | low tom, 4-clap slap, ride |
+| Dub Techno | RES BD soft, dark | formant stab deep into the delay, metallic rim, hat with delay |
+| Schranz | FOLD, folded and driven hard | rumble, 5-clap slap, crushed hat |
+| Hardgroove | RES BD punch | bongo (FM), conga (TOM), ride sample |
+
+Patterns at 130 BPM (Hard Techno 150 and Schranz at 150) peak at -8 to -4 dBFS without clipping: with OUT GAIN +6 dB
+near full scale. The techno kits come after the first eight, so a Pērkons pack's kits move 12 places on in the
+PRESET list; a project keeps its sound either way (it restores every knob, not the kit).
 
 ### Pērkons kit packs
 
@@ -330,6 +373,12 @@ Use one or the other for this plugin: both register the same plugin (same uid), 
   format was worked out from the packs themselves.
 
 ## Status (2026-10-12)
+
+- **2.2.0 (2026-10-18, not yet on the device):** TRANSIENT and CLICK TONE (voices 1-3), compressor ATTACK, OUT GAIN,
+  the techno bank of 12 kits. Offline: host test PASSED (ASan/UBSan), the STEMS test PASSED (87 checks), and with the
+  new controls at their defaults the reference groove is bit-identical to 2.1.0. Skin rebuilt with
+  vst_instruments' framework patch (`deploy/`). To do: Actions build, then on the Force: CPU (`bench.sh`), the new
+  knobs, the techno kits.
 
 - Build and offline host test PASSED (ARM `.so`, the x86 test under ASan/UBSan with the four packs mounted: two
   instances, every parameter, Q-Links, pop-ups, CC and NRPN, chunk restore, 177 kits named in the PRESET menu);

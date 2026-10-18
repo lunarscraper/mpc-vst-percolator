@@ -2279,6 +2279,77 @@
    "max": 0,
    "display": "string",
    "type": "readout"
+  },
+  {
+   "key": "v1_trans",
+   "name": "V1 TRANSIENT",
+   "min": 0,
+   "max": 100,
+   "default": 0,
+   "dynamic_display": true
+  },
+  {
+   "key": "v1_ttone",
+   "name": "V1 CLICK TONE",
+   "min": 0,
+   "max": 100,
+   "default": 50,
+   "dynamic_display": true
+  },
+  {
+   "key": "v2_trans",
+   "name": "V2 TRANSIENT",
+   "min": 0,
+   "max": 100,
+   "default": 0,
+   "dynamic_display": true
+  },
+  {
+   "key": "v2_ttone",
+   "name": "V2 CLICK TONE",
+   "min": 0,
+   "max": 100,
+   "default": 50,
+   "dynamic_display": true
+  },
+  {
+   "key": "v3_trans",
+   "name": "V3 TRANSIENT",
+   "min": 0,
+   "max": 100,
+   "default": 0,
+   "dynamic_display": true
+  },
+  {
+   "key": "v3_ttone",
+   "name": "V3 CLICK TONE",
+   "min": 0,
+   "max": 100,
+   "default": 50,
+   "dynamic_display": true
+  },
+  {
+   "key": "comp_attack",
+   "name": "COMP ATTACK",
+   "min": 0,
+   "max": 100,
+   "default": 0,
+   "dynamic_display": true
+  },
+  {
+   "key": "out_gain",
+   "name": "OUT GAIN",
+   "options": [
+    "0 DB",
+    "+6 DB",
+    "+12 DB"
+   ],
+   "default": "0 DB",
+   "send": [
+    "0",
+    "1",
+    "2"
+   ]
   }
  ]
 }

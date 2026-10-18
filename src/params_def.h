@@ -144,6 +144,14 @@ static const pdef_t PDEF[] = {
     {"v4_gp3", 1, 12, 0.0f},
     {"stems", 1, 3, 0.0f},
     {"stems_status", 3, 0, 0.0f},
+    {"v1_trans", 0, 0, 0.0f},
+    {"v1_ttone", 0, 0, 50.0f},
+    {"v2_trans", 0, 0, 0.0f},
+    {"v2_ttone", 0, 0, 50.0f},
+    {"v3_trans", 0, 0, 0.0f},
+    {"v3_ttone", 0, 0, 50.0f},
+    {"comp_attack", 0, 0, 0.0f},
+    {"out_gain", 1, 3, 0.0f},
 };
 enum {
     P_KIT = 0,
@@ -287,7 +295,15 @@ enum {
     P_V4_GP3 = 138,
     P_STEMS = 139,
     P_STEMS_STATUS = 140,
-    NP = 141
+    P_V1_TRANS = 141,
+    P_V1_TTONE = 142,
+    P_V2_TRANS = 143,
+    P_V2_TTONE = 144,
+    P_V3_TRANS = 145,
+    P_V3_TTONE = 146,
+    P_COMP_ATTACK = 147,
+    P_OUT_GAIN = 148,
+    NP = 149
 };
 /* per-voice block: v%d_tune is P_V1_TUNE + 11 * (v - 1) */
 #define VSTRIDE 11

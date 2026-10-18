@@ -46,12 +46,14 @@ typedef struct {
     int has_fx;
     float fx_time, fx_feedback, fx_rate, fx_depth;   /* 0..100 */
     int fx_range;
+    float trans[NV], ttone[NV];    /* 2.2.0: TRANSIENT, CLICK TONE 0..100 (voices 1-3; a Perkons .KIT: 0 and 50) */
 } kit_t;
 
 /* one voice's controls for a sub-block, after the LFO: 0..1 */
 typedef struct {
     float k[NK];
     int algo, mode, vcf;
+    float trans, ttone;    /* 2.2.0: the click layer (voices 1-3; 0 for voice 4) */
 } vparam_t;
 
 typedef struct {
@@ -88,6 +90,8 @@ typedef struct {
     float last;            /* last engine sample, for the retrigger declick */
     float dclk;
     float cut_s;           /* smoothed cutoff 0..1 */
+    float cenv, cph;       /* 2.2.0: the click layer's envelope and its beater's phase (voices 1-3) */
+    svf_t cf;              /* its noise band-pass */
     room_t room;
 } voice_t;
 

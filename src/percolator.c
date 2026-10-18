@@ -59,6 +59,8 @@ void mpc_engine_transport(void *inst, double bpm, double ppq, int playing);   /*
 #define VVCF(v) VK(v, 10)
 #define VDEPTH(v, k) (P_V1_M_TUNE + MSTRIDE * (v) + (k))
 #define VCOMP(v) (P_V1_COMP + (v))
+#define VTRANS(v) (P_V1_TRANS + 2 * (v))   /* 2.2.0, voices 1-3 */
+#define VTTONE(v) (P_V1_TTONE + 2 * (v))
 #define VIO(v, p) ((p) + (P_V2_NOTE - P_V1_NOTE) * (v))   /* a voice's NOTE / KEYS CH / OUT: VIO(v, P_V1_KCH) */
 
 static int find_key(const char *key) {
@@ -138,6 +140,8 @@ static void vparams(const perc_t *P, int v, vparam_t *vp) {
     vp->algo = (int)P->pv[VALGO(v)];
     vp->mode = (int)P->pv[VMODE(v)];
     vp->vcf = (int)P->pv[VVCF(v)];
+    vp->trans = v < 3 ? P->pv[VTRANS(v)] / 100.0f : 0.0f;
+    vp->ttone = v < 3 ? P->pv[VTTONE(v)] / 100.0f : 0.5f;
 }
 
 /* ---- kits --------------------------------------------------------------------------------------------------- */
@@ -153,6 +157,10 @@ static void load_kit(perc_t *P, int n) {
         P->pv[VALGO(v)] = (float)k->algo[v];
         P->pv[VMODE(v)] = (float)k->mode[v];
         P->pv[VVCF(v)] = (float)k->vcf[v];
+        if (v < 3) {
+            P->pv[VTRANS(v)] = k->trans[v];
+            P->pv[VTTONE(v)] = k->ttone[v];
+        }
         voice_release(P, v);   /* a drone of the old kit stops */
     }
     if (k->has_lfo) {
@@ -310,7 +318,12 @@ static inline int16_t out_sample(float x) {
 typedef struct {
     int on;
     float thr, expo, makeup, rel;   /* makeup includes COMP LEVEL */
+    float att;                      /* 2.2.0, COMP ATTACK: 1 = instant (as before), else the detector's rise per sample */
 } comp_t;
+
+static float comp_attack_s(float knob) { return 0.03f * (knob / 100.0f) * (knob / 100.0f); }   /* 0 .. 30 ms */
+static const float OUT_GAIN[3] = {1.0f, 2.0f, 4.0f};   /* OUT GAIN (2.2.0): 0, +6, +12 dB */
+static float out_gain(const perc_t *P) { int g = (int)P->pv[P_OUT_GAIN]; return OUT_GAIN[g < 0 ? 0 : g > 2 ? 2 : g]; }
 
 static float level_gain(float knob) {   /* VOLUME and COMP LEVEL: 0..100 -> silent .. +6 dB, 71 = 0 dB */
     float x = knob / 100.0f;
@@ -324,11 +337,13 @@ static void comp_setup(const perc_t *P, comp_t *c) {
     c->expo = 1.0f / ratio - 1.0f;
     c->makeup = powf(10.0f, fmaxf(-3.0f - thr_db, 0.0f) * (1.0f - 1.0f / ratio) / 20.0f) * level_gain(P->pv[P_COMP_LEVEL]);
     c->rel = op_coef(1.3f);
+    float at = comp_attack_s(P->pv[P_COMP_ATTACK]);
+    c->att = at < 0.0001f ? 1.0f : 1.0f - expf(-1.0f / (at * SR));
 }
 
 static inline float comp_run(float *env, const comp_t *c, float x) {
     float a = fabsf(x);
-    *env = a > *env ? a : *env + c->rel * (a - *env);
+    *env = a > *env ? *env + c->att * (a - *env) : *env + c->rel * (a - *env);
     return *env > c->thr ? x * powf(*env / c->thr, c->expo) * c->makeup : x * c->makeup;
 }
 
@@ -346,7 +361,7 @@ static void tap_render(perc_t *P, int o, int16_t *out, int frames) {
     }
     comp_t cmp;
     comp_setup(P, &cmp);
-    float vol = level_gain(P->pv[P_VOLUME]);
+    float vol = level_gain(P->pv[P_VOLUME]) * out_gain(P);
     for (int i = 0; i < frames; i++) {
         float x = y[i] * 0.55f;
         if (cmp.on) x = comp_run(&P->comp_env, &cmp, x);
@@ -489,7 +504,7 @@ static void e_render(void *inst, int16_t *out, int frames) {
     float sm = 1.0f - expf(-1.0f / (0.12f * SR));
     comp_t cmp;
     comp_setup(P, &cmp);
-    float vol = level_gain(P->pv[P_VOLUME]);
+    float vol = level_gain(P->pv[P_VOLUME]) * out_gain(P);
     for (int off = 0; off < frames; off += SUB) {
         int n = frames - off < SUB ? frames - off : SUB;
         float mix[SUB] = {0}, cbus[SUB] = {0}, send[SUB] = {0};
@@ -726,6 +741,14 @@ static int e_get_param(void *inst, const char *key, char *buf, int len) {
     case P_COMP_AMT: return x > 0.000001f ? snprintf(buf, len, "%.1f:1", 1.0f + 9.0f * x) : snprintf(buf, len, "OFF");
     case P_COMP_LEVEL: return x > 0.001f ? snprintf(buf, len, "%+.1f dB", 20.0f * log10f(level_gain(P->pv[i]))) : snprintf(buf, len, "-inf dB");
     case P_LFO_SPEED: return snprintf(buf, len, "%.2f Hz", lfo_rate(x));
+    case P_COMP_ATTACK: {
+        float s = comp_attack_s(P->pv[i]);
+        return s < 0.0001f ? snprintf(buf, len, "INSTANT") : snprintf(buf, len, "%.1f ms", s * 1000.0f);
+    }
+    }
+    if (i >= P_V1_TRANS && i < P_V1_TRANS + 6) {   /* 2.2.0: TRANSIENT in %, CLICK TONE as the click's frequency */
+        if ((i - P_V1_TRANS) % 2 == 0) return x > 0.0005f ? snprintf(buf, len, "%.0f %%", x * 100.0f) : snprintf(buf, len, "OFF");
+        return fmt_hz(buf, len, 700.0f * fexp2(3.3f * x));
     }
     return 0;
 }

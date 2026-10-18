@@ -549,6 +549,9 @@ void voice_trigger(perc_t *P, int vi, const vparam_t *vp, float vel, int note, f
     v->hold = 0;
     v->holdc = 0;
     v->slot_bank = P->bank;
+    v->cenv = vp->trans > 0.0005f ? 1.0f : 0.0f;   /* the click layer (2.2.0) starts with every hit */
+    v->cph = 0;
+    v->cf.s1 = v->cf.s2 = 0;
     const float *k = vp->k;
     v->amp = k[K_LEVEL] * k[K_LEVEL] * v->vel;   /* the hit at its level at once (the smoothing is for knob moves) */
     int algo = vp->algo, mode = vp->mode;
@@ -642,6 +645,20 @@ void voice_block(perc_t *P, int vi, const vparam_t *vp, float *mix, float *send,
     else if (!v->active) v->room.tail = 0;
     v->last = v->active ? o[n - 1] : 0;
 
+    /* 2.2.0: the click layer, TRANSIENT (how loud) and CLICK TONE (dull beater thump .. bright tick). It joins after
+     * the filter, so a closed CUTOFF no longer takes away the attack (it took NOISE HIT / PULSE HIT with it), and before
+     * DRIVE, which shapes it with the rest. A beater (a sine swept down from twice the click frequency) and a burst of
+     * band-passed noise, under an envelope of 6 ms (dull) to 1.2 ms (bright). */
+    float ca = 0, cmul = 0, cfreq = 0;
+    svfc_t cfc = {0, 0, 0, 0};
+    if (vp->trans > 0.0005f && v->cenv > 1e-4f) {
+        float tn = vp->ttone;
+        cfreq = 700.0f * fexp2(3.3f * tn);   /* 700 Hz .. 6.9 kHz */
+        ca = 1.3f * powf(vp->trans, 1.5f);
+        cmul = pmul(0.006f * powf(0.2f, tn));
+        svf_coef(&cfc, cfreq * 1.6f, 0.9f);
+    } else v->cenv = 0;
+
     /* the "analog" end: HP / BP / LP (no resonance control), overdrive, level */
     v->cut_s += (k[K_CUTOFF] - v->cut_s) * 0.3f;
     svfc_t fc;
@@ -654,6 +671,15 @@ void voice_block(perc_t *P, int vi, const vparam_t *vp, float *mix, float *send,
         v->dclk *= 0.985f;
         float lp = svf_run(&v->out, &fc, y, &bp, &hp);
         y = vcf == 2 ? lp : vcf == 1 ? bp * 1.4f : hp;
+        if (ca > 0.0f) {
+            float ce = v->cenv;
+            v->cph += cfreq * (1.0f + ce) * INV_SR;
+            v->cph -= (int)v->cph;
+            float nb;
+            svf_run(&v->cf, &cfc, noise(&v->rng), &nb, NULL);
+            y += ca * ce * (0.7f * sin_t(v->cph) + 1.1f * nb * ce);
+            v->cenv *= cmul;
+        }
         y = (sat(g * y + bias) - sb) * mk;
         v->amp += (tgt - v->amp) * 0.02f;
         y *= v->amp;
