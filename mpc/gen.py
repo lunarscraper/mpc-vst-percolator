@@ -23,6 +23,7 @@ NOTE_NAMES = ["%s%d" % (("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "
               for n in range(128)]   # MPC's names: 60 = C3, 36 = C1
 STEM_MODES = ["OFF", "DRY", "AS HEARD"]   # STEMS (src/percolator.c stems_*)
 WAVES = ["SINE", "TRI", "RAMP", "SAW", "SQUARE", "S&H", "DRIFT"]
+OUT_GAINS = ["0 DB", "+6 DB", "+12 DB"]   # OUT GAIN (2.2.0)
 
 # the Init kit (also the engine's defaults): 0..100 for knobs, option index for switches
 INIT = {
@@ -120,6 +121,17 @@ def params():
     # DRY: each voice before the compressor; AS HEARD: each with its share of the compressor, so the files add up to the mix
     opts("stems", "STEMS", STEM_MODES, 0)
     P.append(dict(key="stems_status", name="STEMS STATUS", min=0, max=0, display="string", type="readout"))
+    # 2.2.0 (owner, 2026-10-18: "klingt immer so dünn ... fehlen da vielleicht die Transients?"): a click layer for
+    # voices 1-3 that goes around the voice's filter (the filter used to cut what NOISE HIT / PULSE HIT added),
+    # TRANSIENT = how loud, CLICK TONE = from a dull beater thump to a bright tick (src/voices.c click_*); 0 = as before
+    for v in range(1, 4):
+        knob("v%d_trans" % v, "V%d TRANSIENT" % v, 0, dynamic_display=True)
+        knob("v%d_ttone" % v, "V%d CLICK TONE" % v, 50, dynamic_display=True)
+    # the compressor's attack: 0 = instant, as before (it flattened every hit's first milliseconds); up to 30 ms lets the
+    # transient through before it pulls down
+    knob("comp_attack", "COMP ATTACK", 0, dynamic_display=True)
+    # after VOLUME, into the soft ceiling: the kit sat about 10 dB under other plugins
+    opts("out_gain", "OUT GAIN", OUT_GAINS, 0, send=["0", "1", "2"])
     return P
 
 
@@ -192,6 +204,8 @@ PNAMES = {1: [("FOLD", "PITCH ENV"), ("WAVE POS", "PITCH ENV"), ("ENV TIME", "PI
 
 
 def caption(v, k):
+    if k in ("trans", "ttone"):
+        return "V%d %s" % (v, {"trans": "TRANSIENT", "ttone": "CLICK TONE"}[k])
     if k in ("p1", "p2"):
         return "V%d %s" % (v, PNAMES[v][INIT[v]["algo"]][k == "p2"])
     return "V%d %s" % (v, dict(KNOBS)[k])
@@ -310,6 +324,8 @@ def layout():
     SWY = (200, 306, 428)            # ALGO / MODE / VCF
     MY = 484                         # the MIX plate's top; its knobs level with the second knob row
     VROWS = (("tune", "decay", "p1", "p2"), ("cutoff", "drive"))
+    # 2.2.0: voices 1-3 add TRANSIENT and CLICK TONE to the second row (Q-Link column 3: CUTOFF DRIVE TRANSIENT TONE)
+    VROWS_T = (("tune", "decay", "p1", "p2"), ("cutoff", "drive", "trans", "ttone"))
     MIX = ("level", "fx", "comp")
     for v in range(1, 5):
         c = COL[v]
@@ -341,13 +357,14 @@ def layout():
             L.append("meter cx=%d cy=%d w=%d h=%d key=v%d_%s strip=images/skin/%s.png frames=32"
                      % (mx + cw // 2, my + mh // 2, cw, mh, v, k, name))
             mx += cw
-        for y, ks in zip(KY, VROWS):
+        rows = VROWS_T if v <= 3 else VROWS
+        for y, ks in zip(KY, rows):
             html += h_plate(RX, y - 58, RW, 156, c)
             first = (4 - len(ks)) // 2   # a short row centred on the row above's places
             for i, k in enumerate(ks):
                 knob("v%d_%s" % (v, k), RX + 107 + 215 * (first + i), y, v, 40, caption(v, k))
         art["bgs"].append({"name": "bg_v%d" % v, "html": html})
-        Q = [["algo", "mode", "vcf"], list(VROWS[0]), list(VROWS[1]), list(MIX)]
+        Q = [["algo", "mode", "vcf"], list(rows[0]), list(rows[1]), list(MIX)]
         L.append('qlinks "V%d" = ' % v + ",".join("v%d_%s" % (v, k) if k != "-" else "-"
                                                 for col in Q for k in col + ["-"] * (4 - len(col))))
         L.append("")
@@ -374,14 +391,17 @@ def layout():
     knob("fx_depth", 250, 562, "bbd", 40)
     enum("enum_v", 410, 382, "fx_range", "bbd", 110, 30, "RANGE")
     enum("enum_v", 410, 582, "fx_colour", "bbd", 110, 30, "COLOUR")
-    knob("volume", 700, 346, "mst", 40)
-    for i, k in enumerate(("comp_thresh", "comp_amt", "comp_level")):
-        knob(k, 575 + 125 * i, 562, "mst", 40, bw=118)
+    # 2.2.0: VOLUME and OUT GAIN side by side; the compressor gets ATTACK, its four knobs closer together
+    knob("volume", 620, 346, "mst", 40)
+    enum("enum_v", 800, 366, "out_gain", "mst", 110, 30, "OUT GAIN")
+    for i, (k, lab) in enumerate((("comp_thresh", "THRESH"), ("comp_amt", "AMOUNT"), ("comp_attack", "ATTACK"),
+                                  ("comp_level", "LEVEL"))):
+        knob(k, 560 + 93 * i, 562, "mst", 40, lab, bw=90)
     knob("lfo_speed", 990, 362, "mod", 40)
     knob("lfo_level", 990, 562, "mod", 40)
     L.append('popup cx=1170 cy=374 w=160 h=48 label="WAVE" key=lfo_wave')
     L.append('qlinks "MASTER" = fx_time,fx_feedback,fx_rate,fx_depth,volume,comp_thresh,comp_amt,comp_level,'
-             'lfo_speed,lfo_level,lfo_wave,-,kit')
+             'lfo_speed,lfo_level,lfo_wave,-,kit,out_gain,comp_attack')
     L.append("")
 
     # MIDI & OUT page (owner, 2026-10-12: "they need their own page", "each voice independently for midi notes and
