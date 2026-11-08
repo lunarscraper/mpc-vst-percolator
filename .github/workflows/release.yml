@@ -28,7 +28,7 @@ jobs:
       tools_repo: saustin2010/mpc-vst-plugins
       tools_ref: eaef502c0a537605b73a0e2a78dfcbe66e45cf6c
       vst_dir: .
-      build: bash "$MPC_VST/tools/build_port.sh" vst.json && rm -rf build/skin && mkdir -p build/skin && cp -R deploy/Synths/* build/skin/
+      build: python3 mpc/wrap_fix.py "$MPC_VST/wrapper/vst2_wrap.c" && bash "$MPC_VST/tools/build_port.sh" vst.json && rm -rf build/skin && mkdir -p build/skin && cp -R deploy/Synths/* build/skin/
       host_test: '"$MPC_VST/tools/test_port.sh" vst.json'
       user_data: percolator
       plugin_id: percolator
