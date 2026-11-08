@@ -374,6 +374,9 @@ Use one or the other for this plugin: both register the same plugin (same uid), 
 
 ## Status (2026-10-12)
 
+- **2.2.1 (2026-11-08, not yet on the device):** NOTE (page MIDI & OUT) steps one note per data-wheel click or Q-Link
+  event. Before, the wheel skipped every fourth note (D1 -> D#1 -> F1, so E1 couldn't be set). A build-time patch of the
+  shared wrapper, [FRAMEWORK.md](FRAMEWORK.md). Offline: host test PASSED with a note-stepping check added locally.
 - **2.2.0 (2026-10-18, not yet on the device):** TRANSIENT and CLICK TONE (voices 1-3), compressor ATTACK, OUT GAIN,
   the techno bank of 12 kits. Offline: host test PASSED (ASan/UBSan), the STEMS test PASSED (87 checks), and with the
   new controls at their defaults the reference groove is bit-identical to 2.1.0. Skin rebuilt with

@@ -12,6 +12,18 @@ This plugin is built with [saustin2010/mpc-vst-plugins](https://github.com/saust
 | `mpc_engine_changed()` [`eaef502`](https://github.com/saustin2010/mpc-vst-plugins/commit/eaef502) | The engine tells the wrapper which controls it changed itself (the Pērkons CCs and MIDI MOD lanes it reads on its own MIDI port), so MPC's screen and Q-Links follow them. | The CCs and lanes still move the sound, but the screen and the Q-Links keep showing the old values. |
 | `QLINK_TRAVEL` and `SET_IF_CHANGED` in `vst.json` `defines` [`10d8f5f`](https://github.com/saustin2010/mpc-vst-plugins/commit/10d8f5f) | Q-Link and data-wheel ticks add up like a detented knob, and a switch moves after half an option's width of turn; a set to the value the engine already holds is skipped. This is how the plugin was checked on the device. | Every tick steps an option: on a Live II, turning one Q-Link flipped other switches (8 October 2026). |
 
+## A patch on top: `mpc/wrap_fix.py` (2.2.1)
+
+The release's `build:` line runs `python3 mpc/wrap_fix.py "$MPC_VST/wrapper/vst2_wrap.c"` before `build_port.sh`, so the
+build and the host test use a wrapper with one change: with `QLINK_TRAVEL`, a host event that moves an option list by half
+an option or more steps from the option the engine holds (by the event's size in whole options, at least one) and keeps no
+unrounded "shadow" position. Only the 128-entry NOTE lists are affected: a data-wheel click is 0.01 of the range = 1.27
+notes, and with the shadow the remainders added up so every fourth click jumped two notes (D1 -> D#1 -> F1; E1 could not be
+reached with the wheel, Force, 2026-11-08). Short lists (ALGO, MODE ... a Q-Link event is 1/43 of an option there) still
+move by travel. Offline (2026-11-08, x86 host test): ten wheel clicks up and down and ten Q-Link events from C1-D#1 step
+exactly one note each; without the patch the wheel skips notes; the travel checks still pass. The script stops the build
+if the wrapper's code differs from what it knows, and is the change to offer upstream.
+
 ## The screen ships as built here
 
 The release builds the plugin with these tools but ships the skin in `deploy/Synths/`, built by vst_instruments' own tools (`tools/build.sh`) and checked on the device: sd88me's skin builder lays out this plugin's per-sub-page controls (`banks=`) and readouts differently. Rebuild `deploy/` with `tools/build.sh` in vst_instruments after changing `layout.conf` or `mpc/gen.py`, before a release.
